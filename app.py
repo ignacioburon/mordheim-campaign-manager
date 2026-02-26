@@ -2,38 +2,42 @@ import streamlit as st
 from src.database import db, logger
 from src.ui_components import apply_custom_styles, sidebar_user_info
 from src.views.login import show_login_view
+from src.views.admin_panel import show_admin_panel
+from src.views.dashboard import show_player_dashboard
 
-# 1. SETUP
-st.set_page_config(page_title="Mordheim Manager", layout="wide")
+# Application Setup
+st.set_page_config(page_title="Mordheim Manager", layout="wide", page_icon="⚔️")
 apply_custom_styles()
 
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# 2. ROUTING LOGIC
+# Routing Logic
 if not st.session_state.user:
     show_login_view()
 else:
     try:
-        # Fetch Profile
+        # 1. Fetch Fresh User Profile
         profile_res = db.table("profiles").select("*").eq("id", st.session_state.user.id).single().execute()
         profile = profile_res.data
         
-        # Global Sidebar
+        if not profile:
+            logger.error(f"No profile found for UID: {st.session_state.user.id}")
+            st.error("Profile not found. Please contact the administrator.")
+            st.stop()
+
+        # 2. Render Sidebar
         sidebar_user_info(profile)
 
-        # Content Routing
+        # 3. Render View based on Role
         if profile['role'] == 'owner':
-            # We could move this to src/views/admin_panel.py
-            st.header("👑 Grand Master's Quarters")
-            st.write("Admin tools here...")
+            show_admin_panel(profile)
         else:
-            st.header("📜 Warband Ledger")
-            st.info("The city guards are inspecting your papers...")
+            show_player_dashboard(profile)
 
     except Exception as e:
-        logger.error(f"Routing Error: {e}")
-        st.error("Something went wrong. Please try logging in again.")
-        if st.button("Hard Reset"):
+        logger.error(f"Main App Routing Error: {e}")
+        st.error("A critical error occurred in the city. Re-entering...")
+        if st.button("Retry Entry"):
             st.session_state.user = None
             st.rerun()
