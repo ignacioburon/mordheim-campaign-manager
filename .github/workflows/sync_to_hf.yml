@@ -1,0 +1,1 @@
+run: git push --force https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/mordheim-campaign-manager main
