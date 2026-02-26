@@ -60,16 +60,22 @@ def login_user(email, password):
         return False
 
 def request_password_reset(email):
-    """Triggers the password recovery email flow."""
+    """Triggers the recovery flow with a specific redirect back to the Space."""
     try:
-        db.auth.reset_password_for_email(email)
-        logger.info(f"Reset Email Requested | Email: {email}")
-        # We show success even if email doesn't exist for security (generic response)
-        st.success("If an account exists for this email, a reset link has been sent.")
+        # We explicitly set the redirectTo parameter
+        redirect_url = "https://huggingface.co/spaces/ignacioburon/mordheim-campaign-manager"
+        
+        db.auth.reset_password_for_email(
+            email, 
+            options={"redirect_to": redirect_url}
+        )
+        
+        logger.info(f"Recovery link sent to: {email}")
+        st.success("The carrier pigeon is on its way. Check your inbox.")
         return True
     except Exception as e:
-        logger.error(f"Reset Request Error | Email: {email} | Error: {e}")
-        st.error("The carrier pigeon failed. Please try again later.")
+        logger.error(f"Recovery Request Failed: {e}")
+        st.error("The messenger failed to leave the city. Try again later.")
         return False
 
 def update_user_password(new_password, confirm_password):
