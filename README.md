@@ -2,7 +2,7 @@
 title: Mordheim Campaign Manager
 emoji: ⚔️
 colorFrom: red
-colorTo: black
+colorTo: gray
 sdk: streamlit
 sdk_version: 1.31.0
 app_file: app.py
