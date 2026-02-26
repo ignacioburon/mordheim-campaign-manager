@@ -1,91 +1,78 @@
 import streamlit as st
-from src.database import supabase
-from src.auth import login_user, register_user, check_token_validity
+from src.database import db
+from src.auth import verify_invitation_token, process_registration
 import secrets
 
-# Page Configuration
-st.set_page_config(page_title="Mordheim: City of the Damned", layout="wide")
+# UI Configuration
+st.set_page_config(page_title="Mordheim Manager", layout="wide")
 
-# Session Initialization
+# Session State
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# 1. UNAUTHENTICATED VIEW
+# --- UNAUTHENTICATED FLOW ---
 if not st.session_state.user:
     st.title("⚔️ MORDHEIM CAMPAIGN MANAGER")
     
-    # Capture token from URL
-    url_token = st.query_params.get("token", "").strip()
-    
-    tab_login, tab_reg = st.tabs(["[ Login ]", "[ Register ]"])
-    
+    # Securely retrieve token from URL params
+    token_param = st.query_params.get("token")
+    current_token = str(token_param).strip() if token_param else None
+
+    tab_login, tab_signup = st.tabs(["Login", "Sign Up"])
+
     with tab_login:
-        with st.form("login_form"):
-            email = st.text_input("Explorer Email")
+        with st.form("auth_login"):
+            email = st.text_input("Email")
             pwd = st.text_input("Password", type="password")
             if st.form_submit_button("ENTER THE CITY"):
-                success, msg = login_user(email, pwd)
-                if success: st.rerun()
-                else: st.error(msg)
+                try:
+                    res = db.auth.sign_in_with_password({"email": email, "password": pwd})
+                    st.session_state.user = res.user
+                    st.rerun()
+                except:
+                    st.error("Access denied. Check your credentials.")
 
-    with tab_reg:
-        if not url_token:
-            st.warning("⚠️ A valid Invitation Scroll (Token) is required to join.")
+    with tab_signup:
+        if not current_token:
+            st.warning("An invitation scroll is required to register.")
         else:
-            token_data = check_token_validity(url_token)
-            if not token_data:
+            records = verify_invitation_token(current_token)
+            if not records:
                 st.error("Invalid or expired scroll.")
             else:
-                st.success(f"Scroll verified: {url_token}")
-                with st.form("registration_form"):
+                st.success(f"Scroll verified: {current_token}")
+                with st.form("auth_reg"):
                     new_email = st.text_input("Email")
                     new_pwd = st.text_input("Password (min 6 chars)", type="password")
-                    user_nm = st.text_input("Captain Name")
+                    username = st.text_input("Captain Name")
                     if st.form_submit_button("FOUND WARBAND"):
-                        success, msg = register_user(new_email, new_pwd, user_nm, url_token)
-                        if success: st.success(msg)
-                        else: st.error(msg)
+                        if process_registration(new_email, new_pwd, username, current_token):
+                            st.balloons()
+                            st.success("Warband founded! You may now login.")
 
-# 2. AUTHENTICATED VIEW
+# --- AUTHENTICATED FLOW ---
 else:
-    # Fetch user profile
-    profile = supabase.table("profiles").select("*").eq("id", st.session_state.user.id).single().execute().data
-    
-    # Sidebar Navigation
-    st.sidebar.title(f"🎭 {profile['username']}")
-    st.sidebar.caption(f"Rank: {profile['role'].upper()}")
-    
-    if st.sidebar.button("Leave the City"):
-        supabase.auth.sign_out()
-        st.session_state.user = None
-        st.rerun()
-
-    # OWNER DASHBOARD
-    if profile['role'] == 'owner':
-        st.header("👑 Grand Master's Quarters")
-        col_inv, col_app = st.columns(2)
+    try:
+        # Fetching profile from the new non-recursive policy
+        profile = db.table("profiles").select("*").eq("id", st.session_state.user.id).single().execute().data
         
-        with col_inv:
-            st.subheader("Send Invitations")
-            if st.button("Generate New Scroll"):
-                new_t = secrets.token_urlsafe(8)
-                supabase.table("invitation_tokens").insert({"token": new_t}).execute()
-                invite_url = f"https://huggingface.co/spaces/ignacioburon/mordheim-campaign-manager?token={new_t}"
-                st.code(invite_url, language="text")
+        st.sidebar.title(f"🎭 {profile['username']}")
+        st.sidebar.write(f"Rank: {profile['role'].upper()}")
         
-        with col_app:
-            st.subheader("Approve Recluits")
-            pending = supabase.table("profiles").select("*").eq("is_approved", False).execute().data
-            for p in pending:
-                st.write(f"🔹 {p['username']}")
-                if st.button(f"Approve {p['username']}", key=p['id']):
-                    supabase.table("profiles").update({"is_approved": True}).eq("id", p['id']).execute()
-                    st.rerun()
+        if st.sidebar.button("Logout"):
+            db.auth.sign_out()
+            st.session_state.user = None
+            st.rerun()
 
-    # PLAYER DASHBOARD
-    else:
-        st.header("📜 Warband Ledger")
-        if not profile['is_approved']:
-            st.warning("Waiting for the Grand Master's approval to enter the city gates.")
+        if profile['role'] == 'owner':
+            st.header("👑 Grand Master's Quarters")
+            if st.button("Generate New Invitation Token"):
+                new_token = secrets.token_urlsafe(8)
+                db.table("invitation_tokens").insert({"token": new_token}).execute()
+                st.code(f"https://huggingface.co/spaces/ignacioburon/mordheim-campaign-manager?token={new_token}")
         else:
-            st.info("The city of Mordheim awaits your command. (Warband modules coming soon).")
+            st.header("📜 Warband Ledger")
+            st.info("Your warband is currently being inspected by the city guards.")
+            
+    except Exception as e:
+        st.error("Error loading profile. Check database RLS policies.")
